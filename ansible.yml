@@ -1,0 +1,131 @@
+---
+
+- hosts: host
+  become: yes
+  become_user: root
+  become_method: sudo
+  tasks:
+    - name: update and upgrade apt packages
+      apt:
+        upgrade: 'yes'
+        update_cache: yes    
+    - name: Install base packages
+      apt: pkg={{ item }} state=present
+      with_items:
+        - python3-pip
+        - python3-dev
+        - git
+        - nginx
+        - postgresql-common
+        - python3-psycopg2
+        - libpq-dev
+      tags:
+        - [packages]
+
+    - name: Clone ChatApplication from Github
+      git:
+        repo: https://github.com/Moneshs/ChatApplication.git
+        dest: /home/ubuntu/ChatApplication/chatapp
+        version: master
+        force: yes
+
+    - name: Install pip
+      apt:
+        name: python3-pip
+        state: present
+
+    - name: Install virtualenv
+      command: pip3 install virtualenv
+
+    - name: creating virtualenv
+      command: virtualenv -p /usr/bin/python3 /home/ubuntu/ChatApplication/venv
+
+
+    - name: Activate env
+      command: cd /home/ubuntu/ChatApplication/venv; source bin/activate
+      command: /home/ubuntu/ChatApplication/venv/bin/pip3 install -r /home/ubuntu/ChatApplication/chatapp/chat/requirements.txt
+
+    - name:  psycopg
+      command: pip3 install psycopg2
+    - name: channels
+      command: pip3 install channels
+  
+    - name: gunicorn
+      command: pip3 install gunicorn
+    - name: django extensions
+      command: pip3 install django bcrypt django-extensions
+      
+    - name: Execute
+      file:
+        path: /home/ubuntu/ChatApplication/chatapp/chat/manage.py
+        mode: '0777'
+
+    - name: collect static files
+      django_manage:
+        command: collectstatic
+        virtualenv: /home/ubuntu/ChatApplication/venv
+        app_path: /home/ubuntu/ChatApplication/chatapp/chat
+
+    - name: Change file ownership and permissions
+      file:
+         path: /home/ubuntu/ChatApplication
+         owner: ubuntu
+         group: www-data
+         mode: '0755'
+         state: directory
+         recurse: yes
+
+#    - name: gunicorn.service
+#      copy:
+#       dest: /etc/systemd/system/gunicorn.service
+#       content: | 
+#        [Unit]
+#        Description=gunicorn daemon
+#        After=network.target
+#        [Service]
+#        User=ubuntu
+#        Group=www-data
+#        WorkingDirectory=/home/ubuntu/ChatApplication/chat
+#        ExecStart=/home/ubuntu/ChatApplication/venv/bin/gunicorn --workers 3 --bind unix:/home/ubuntu/ChatApplication/chat/chatapp.sock chatapp.wsgi:application
+#        [Install]
+#        WantedBy=multi-user.target
+
+    - name: gunicorn
+      template: 
+        src: /home/bridgelabz/Monesh/ansible/gunicorn.service.j2
+        dest: /etc/systemd/system/gunicorn.service
+      notify:
+          - restart gunicorn
+
+    - name: execute
+      file: 
+        path: /etc/systemd/system/gunicorn.service
+        mode: '0644'
+
+    - name: nginx
+      template:
+        src: /home/bridgelabz/Monesh/ansible/nginx.conf.j2
+        dest: /etc/nginx/sites-available/chatapp
+      notify:
+          - restart nginx
+
+    - name: configuraing nginx-1
+      command: ln -s /etc/nginx/sites-available/chatapp /etc/nginx/sites-enabled
+     
+    - name: configuraging nginx-2
+      command:  nginx -t
+    - name:
+      command: rm /etc/nginx/sites-enabled/default 
+   
+  handlers:
+    - name: restart gunicorn
+      systemd:
+           name: gunicorn.service
+           daemon_reload: yes
+           enabled: yes
+           state: restarted
+
+    - name: restart nginx
+      service:
+           name: nginx 
+           state: restarted
